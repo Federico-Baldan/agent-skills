@@ -22,7 +22,8 @@
     "skills:package": "node scripts/skills.mjs package",
     "skills:install": "node scripts/skills.mjs install",
     "skills:autoupdate": "node scripts/skills.mjs autoupdate",
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "notify:setup": "bash scripts/telegram-setup.sh"
   },
   "devDependencies": {
     "skills": "1.7.0",

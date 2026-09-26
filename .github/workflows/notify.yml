@@ -1,0 +1,116 @@
+name: Notify
+
+on:
+  schedule:
+    - cron: '0 7 * * *' # every day, 09:00 in Italy (summer time)
+  workflow_run:
+    workflows: [Update skills]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      test:
+        description: Send a message even when nothing is stuck
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  checks: read
+  statuses: read
+
+concurrency:
+  group: notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Telegram alert for stuck PRs and failed jobs
+    # After an "Update skills" run, only speak up if it did not succeed.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check and notify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STALE_AFTER_HOURS: ${{ vars.STALE_PR_HOURS || '24' }}
+          MODE: ${{ github.event_name == 'workflow_run' && 'run-finished' || (github.event_name == 'workflow_dispatch' && inputs.test) && 'test' || 'report' }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          if ! [[ "$STALE_AFTER_HOURS" =~ ^[0-9]+$ ]]; then
+            echo "::error::The STALE_PR_HOURS variable must be a whole number of hours, not '$STALE_AFTER_HOURS'."
+            exit 1
+          fi
+
+          if [ "$MODE" = 'run-finished' ]; then
+            text="❌ $repo: il job \"$RUN_NAME\" è finito con esito \"$RUN_CONCLUSION\", quindi questa settimana nessun aggiornamento è entrato.
+          $RUN_URL"
+          else
+            # Open PRs older than the threshold, each with the reasons it can't merge by itself.
+            stale="$(gh pr list --repo "$repo" --state open --limit 50 \
+              --json number,title,url,createdAt,isDraft,mergeStateStatus,author,autoMergeRequest,statusCheckRollup \
+              | jq -r --argjson now "$(date +%s)" --argjson hours "$STALE_AFTER_HOURS" '
+                def age: (($now - (.createdAt | fromdateiso8601)) / 3600 | floor);
+                def failed: ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"];
+                def reasons:
+                  .mergeStateStatus as $state
+                  | [ .statusCheckRollup[]? | select((.conclusion // .state) as $s | failed | index($s)) | (.name // .context) ] as $failing
+                  | [ (if .isDraft then "è una bozza" else empty end),
+                      (if .mergeStateStatus == "DIRTY" then "ha conflitti con main" else empty end),
+                      (if .mergeStateStatus == "BEHIND" then "è indietro rispetto a main" else empty end),
+                      (if (.statusCheckRollup | length) == 0 then "i controlli non sono mai arrivati"
+                       elif ($failing | length) > 0 then "controlli falliti: \($failing | join(", "))"
+                       elif any(.statusCheckRollup[]; (.status // "COMPLETED") != "COMPLETED" or .state == "PENDING" or .state == "EXPECTED")
+                         then "controlli ancora in corso"
+                       else empty end),
+                      (if .autoMergeRequest == null then "auto-merge non attivo: aspetta la tua approvazione" else empty end) ]
+                  | if length == 0 then ["bloccata (stato GitHub: \($state))"] else . end;
+                map(select(age >= $hours))
+                | map("• #\(.number) \(.title) (da \(if age >= 48 then "\(age / 24 | floor) giorni" else "\(age)h" end), di \(.author.login))\n  \(reasons | join("; "))\n  \(.url)")
+                | join("\n")')"
+
+            # The last finished run on main of each workflow: a failed update opens no PR, so nothing else would tell you.
+            failed=''
+            for workflow in update-skills.yml validate.yml; do
+              line="$(gh run list --repo "$repo" --workflow "$workflow" --branch main --status completed --limit 1 \
+                --json workflowName,conclusion,url \
+                --jq '.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure") | "• \(.workflowName) (\(.conclusion))\n  \(.url)"')"
+              if [ -n "$line" ]; then failed+="$line"$'\n'; fi
+            done
+
+            if [ -n "$stale" ] || [ -n "$failed" ]; then
+              text="⚠️ $repo"
+              if [ -n "$stale" ]; then text+=$'\n\n'"PR aperte da più di ${STALE_AFTER_HOURS}h:"$'\n'"$stale"; fi
+              if [ -n "$failed" ]; then text+=$'\n\n'"Job falliti:"$'\n'"${failed%$'\n'}"; fi
+            elif [ "$MODE" = 'test' ]; then
+              text="✅ $repo: nessuna PR in stallo da più di ${STALE_AFTER_HOURS}h e nessun job fallito."
+            else
+              echo 'Nothing is stuck; no message sent.'
+              exit 0
+            fi
+          fi
+
+          echo "$text"
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "::warning::Telegram is not configured (secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID): run 'npm run notify:setup' once."
+            exit 0
+          fi
+
+          # Telegram's official Bot API. The token only travels in the request URL; nothing here prints it.
+          response="$(curl -sS --max-time 20 -X POST "${TELEGRAM_API_BASE:-https://api.telegram.org}/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${text:0:4000}" -d disable_web_page_preview=true)"
+          if [ "$(jq -r '.ok' <<< "$response")" != 'true' ]; then
+            echo "::error::Telegram refused the message: $(jq -r '.description // "unknown error"' <<< "$response")"
+            exit 1
+          fi
+          echo 'Sent to Telegram.'

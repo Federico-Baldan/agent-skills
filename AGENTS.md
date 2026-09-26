@@ -37,6 +37,7 @@ npm run skills:validate                           # spec + integrity checks (CI 
 npm run skills:catalog                            # regenerate CATALOG.md
 npm run skills:package                            # dist/<skill>.zip for Claude.ai / ChatGPT
 npm run skills:install                            # install this repo's skills on this machine
+npm run notify:setup                              # once: Telegram alerts for stuck PRs (run it in a real terminal)
 npm test
 ```
 

@@ -10,7 +10,7 @@ See [CATALOG.md](CATALOG.md) for what's inside.
 skills.sh / any git repo ──(weekly GitHub Action: skills update)──► pull request here
                                                                       │ merge
                                                                       ▼
-your machines ◄──(npx skills update -g, daily timer)── Federico-Baldan/agent-skills
+your machines ◄──(npx skills update -g, when you run it)── Federico-Baldan/agent-skills
 Claude.ai / ChatGPT ◄──(zip upload)── skill-zips artifact of the Validate workflow
 ```
 
@@ -43,13 +43,9 @@ npm run skills:install -- --agent claude-code codex     # pick agents
 npm run skills:install -- --skill grill-me grilling     # pick skills
 ```
 
-That's `npx skills add Federico-Baldan/agent-skills -g --skill '*' -y` under the hood, so it works without cloning too. Because the source is this GitHub repo, `npx skills update -g` later pulls whatever you've merged here. (`--local` installs the working copy instead: handy for trying a skill before pushing, but it's a snapshot that `update -g` won't refresh.) To run the update every day on Linux:
+That's `npx skills add Federico-Baldan/agent-skills -g --skill '*' -y` under the hood, so it works without cloning too. (`--local` installs the working copy instead: handy for trying a skill before pushing, but it's a snapshot that `update -g` won't refresh.)
 
-```bash
-npm run skills:autoupdate -- enable     # systemd user timer; also: status, run, disable
-```
-
-The timer uses the `skills` version pinned in `package.json`; re-run `enable` after pulling to move it forward. On macOS or Windows, schedule `npx --yes skills update --global --yes` with launchd or Task Scheduler instead. Either way it updates *all* your globally installed skills, not only the ones from this repo, and reinstalls each into every agent it detects on the machine.
+The repo keeps itself current on GitHub without any machine switched on. The copies installed on a machine are refreshed from the repo whenever you run `npx skills update -g`; that command updates *all* your globally installed skills and reinstalls each into every agent it detects. If you'd rather have it run daily on a Linux machine, `npm run skills:autoupdate -- enable` sets up a systemd user timer (`disable` removes it).
 
 **Claude.ai / Claude Desktop and ChatGPT** don't read folders from disk; they take one zip per skill. Run `npm run skills:package` (or download the `skill-zips` artifact from the latest Validate run) and upload `dist/<skill>.zip`: in Claude under [Customize → Skills](https://claude.ai/customize/skills) → Add, in ChatGPT under Skills → Create → Upload from your computer. For `grill-me`, upload `grilling.zip` too, since `grill-me` just hands off to it.
 
@@ -76,8 +72,20 @@ The timer uses the `skills` version pinned in `package.json`; re-run `enable` af
 | `Update skills` | Mondays 05:17 UTC, or by hand | `skills update` for every upstream skill that's been unchanged upstream for 7+ days; opens (and auto-merges) one PR if anything changed |
 | `Validate` | pushes to `main`, every PR, and each bot update | unit tests, spec and integrity checks, CLI smoke test, builds the zips |
 | Renovate | Monday mornings (Europe/Rome) | bumps the `skills` CLI, Node and pinned actions once a release is 7 days old; auto-merges non-major bumps after CI; weekly lock file maintenance |
+| `Notify` | daily 07:00 UTC, and right after a failed `Update skills` | Telegram message if a PR has been open for more than 24h (with why it's stuck) or the last run of `Update skills`/`Validate` on `main` failed |
 
 Validation fails if a `SKILL.md` breaks the spec (name, description, length limits), if an upstream skill no longer matches its hash in `upstream/integrity.json` (someone edited it by hand), if any skill contains a symlink (it could smuggle a local file into an upload zip), or if `CATALOG.md` is stale. GitHub doesn't start workflows (or count their checks) for its own bot's pushes, so the update job runs the tests, the validation and the pinned CLI itself and reports `Validate skills` and `Skills CLI smoke test` on the bot commit, each linking to that run. GitHub may also list a Validate run marked "action required" on bot PRs; it isn't needed and can be ignored. GitHub pauses scheduled workflows after 60 days without repo activity; Renovate's weekly PRs normally prevent that, and re-enabling is one click in the Actions tab.
+
+## Telegram alerts
+
+The `Notify` workflow is a plain bash step using `gh`, `jq`, `curl` and Telegram's official Bot API. It stays silent while everything flows; it writes when a pull request has been open for more than 24 hours (saying why: failed checks, conflicts, a draft, checks that never arrived, or waiting for your approval) or when the latest `Update skills` or `Validate` run on `main` failed. A failed weekly update alerts you immediately, because it opens no PR you could notice.
+
+Set it up once:
+
+1. In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot` and copy the token.
+2. In a terminal inside this repo, run `npm run notify:setup`, paste the token (the input is hidden) and send any message to your new bot when asked. The script stores the token and your chat id as encrypted repository secrets and sends a test message.
+
+Change the 24 hours with the repository variable `STALE_PR_HOURS`. To check it any time: Actions → Notify → Run workflow (it sends a message even when all is well).
 
 Only established tooling is involved: Vercel's `skills` CLI, GitHub's own actions and `gh`, Mend's Renovate, and the standard `yaml` parser. Every action is pinned to a commit SHA.
 
