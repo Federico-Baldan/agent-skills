@@ -92,6 +92,14 @@ jobs:
             gh pr edit "$open_pr" --body-file "$RUNNER_TEMP/body.md"
           fi
 
+          pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+
+          # Turn on native auto-merge first, while the new commit has no checks yet: GitHub then merges by itself
+          # the moment the checks below are reported, so there's no race with a merge we'd trigger ourselves.
+          if [ "$AUTO_MERGE" = 'true' ] && [ "$(gh pr view "$pr" --json autoMergeRequest --jq '.autoMergeRequest != null')" != 'true' ]; then
+            gh pr merge "$pr" --auto --squash
+          fi
+
           # This job just ran the tests, the validation and the pinned skills CLI on exactly this commit, so it reports
           # the two checks main requires. (Runs started by GITHUB_TOKEN never show up as PR checks, so we can't rely on them.)
           sha="$(git rev-parse HEAD)"
@@ -100,8 +108,3 @@ jobs:
               -f description='Passed in the Update skills workflow' \
               -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
           done
-
-          if [ "$AUTO_MERGE" = 'true' ]; then
-            # Native auto-merge: GitHub merges only once the required checks on main pass.
-            gh pr merge "$BRANCH" --auto --squash --delete-branch
-          fi
