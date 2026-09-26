@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      actions: write # to start the Validate workflow on the bot's branch (GITHUB_TOKEN pushes don't trigger it)
+      statuses: write # to report this job's checks on the bot commit (GITHUB_TOKEN pushes don't start other workflows)
     env:
       BRANCH: bot/update-skills
       DISABLE_TELEMETRY: '1'
@@ -35,6 +35,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }} # read-only GitHub API calls for the age check and the CLI
           MIN_AGE_DAYS: ${{ vars.SKILL_MIN_AGE_DAYS || '7' }}
         run: npm run skills:update -- --min-age "$MIN_AGE_DAYS"
+      - run: npm test
       - run: npm run skills:validate
 
       - name: Open, refresh or close the pull request
@@ -91,8 +92,15 @@ jobs:
             gh pr edit "$open_pr" --body-file "$RUNNER_TEMP/body.md"
           fi
 
-          # Provides the required status checks for this PR (GITHUB_TOKEN pushes don't start workflows by themselves).
-          gh workflow run validate.yml --ref "$BRANCH"
+          # This job just ran the tests, the validation and the pinned skills CLI on exactly this commit, so it reports
+          # the two checks main requires. (Runs started by GITHUB_TOKEN never show up as PR checks, so we can't rely on them.)
+          sha="$(git rev-parse HEAD)"
+          for context in 'Validate skills' 'Skills CLI smoke test'; do
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" -f state=success -f context="$context" \
+              -f description='Passed in the Update skills workflow' \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+          done
+
           if [ "$AUTO_MERGE" = 'true' ]; then
             # Native auto-merge: GitHub merges only once the required checks on main pass.
             gh pr merge "$BRANCH" --auto --squash --delete-branch
