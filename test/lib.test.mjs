@@ -10,6 +10,7 @@ import {
   findSymlinks,
   frontmatterIssues,
   hashSkillDir,
+  lastUpstreamChange,
   licenseFile,
   loadSkills,
   parseSkillMd,
@@ -108,6 +109,36 @@ describe('licenseFile', () => {
     assert.equal(licenseFile('/r', { sourceType: 'github', source: 'mattpocock/skills' }), join('/r', 'licenses', 'mattpocock__skills.txt'));
     assert.equal(licenseFile('/r', { sourceType: 'gitlab', source: 'owner/repo' }), null);
     assert.equal(licenseFile('/r', { sourceType: 'github', source: '../evil' }), null);
+  });
+});
+
+describe('lastUpstreamChange', () => {
+  const fakeFetch = (calls, body, ok = true) => async (url, options) => {
+    calls.push({ url: String(url), auth: options.headers.authorization });
+    return { ok, status: ok ? 200 : 403, json: async () => body };
+  };
+
+  test('asks GitHub for the last commit touching the skill folder', async () => {
+    const calls = [];
+    const date = await lastUpstreamChange(
+      { sourceType: 'github', source: 'mattpocock/skills', skillPath: 'skills/productivity/grill-me/SKILL.md' },
+      { fetchImpl: fakeFetch(calls, [{ commit: { committer: { date: '2026-09-01T10:00:00Z' } } }]), token: 't0k' },
+    );
+    assert.equal(date.toISOString(), '2026-09-01T10:00:00.000Z');
+    assert.equal(calls[0].url, 'https://api.github.com/repos/mattpocock/skills/commits?per_page=1&path=skills%2Fproductivity%2Fgrill-me');
+    assert.equal(calls[0].auth, 'Bearer t0k');
+  });
+
+  test('returns null for non-GitHub sources and throws on API errors', async () => {
+    assert.equal(await lastUpstreamChange({ sourceType: 'gitlab', source: 'a/b' }, { fetchImpl: fakeFetch([], []) }), null);
+    await assert.rejects(
+      lastUpstreamChange({ sourceType: 'github', source: 'a/b', skillPath: 'SKILL.md' }, { fetchImpl: fakeFetch([], {}, false), token: '' }),
+      /HTTP 403/,
+    );
+    await assert.rejects(
+      lastUpstreamChange({ sourceType: 'github', source: 'a/b', skillPath: 'SKILL.md' }, { fetchImpl: fakeFetch([], []), token: '' }),
+      /no commits/,
+    );
   });
 });
 

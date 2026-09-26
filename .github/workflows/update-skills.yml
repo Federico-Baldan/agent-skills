@@ -30,8 +30,11 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Update upstream skills with the skills CLI
-        run: npm run skills:update
+      - name: Update upstream skills that have been stable upstream long enough
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # read-only GitHub API calls for the age check and the CLI
+          MIN_AGE_DAYS: ${{ vars.SKILL_MIN_AGE_DAYS || '7' }}
+        run: npm run skills:update -- --min-age "$MIN_AGE_DAYS"
       - run: npm run skills:validate
 
       - name: Open, refresh or close the pull request
@@ -39,6 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BASE: ${{ github.ref_name }}
           AUTO_MERGE: ${{ vars.AUTO_MERGE_SKILL_UPDATES }}
+          MIN_AGE_DAYS: ${{ vars.SKILL_MIN_AGE_DAYS || '7' }}
         run: |
           if [ "$BASE" = "$BRANCH" ]; then
             echo "Run this workflow from the default branch, not from $BRANCH."
@@ -71,7 +75,7 @@ jobs:
           git push --force origin "$BRANCH"
 
           {
-            echo 'The weekly skills update found new versions of these upstream skills:'
+            echo "The weekly skills update found new versions of these upstream skills (each unchanged upstream for at least $MIN_AGE_DAYS days):"
             echo
             printf '%s\n' "$skills_changed"
             echo
@@ -87,9 +91,9 @@ jobs:
             gh pr edit "$open_pr" --body-file "$RUNNER_TEMP/body.md"
           fi
 
+          # Provides the required status checks for this PR (GITHUB_TOKEN pushes don't start workflows by themselves).
+          gh workflow run validate.yml --ref "$BRANCH"
           if [ "$AUTO_MERGE" = 'true' ]; then
-            gh pr merge "$BRANCH" --squash --delete-branch
-            gh workflow run validate.yml --ref "$BASE"
-          else
-            gh workflow run validate.yml --ref "$BRANCH"
+            # Native auto-merge: GitHub merges only once the required checks on main pass.
+            gh pr merge "$BRANCH" --auto --squash --delete-branch
           fi

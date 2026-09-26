@@ -12,6 +12,7 @@ import {
   exists,
   findSymlinks,
   hashSkillDir,
+  lastUpstreamChange,
   licenseFile,
   loadSkills,
   parseSkillMd,
@@ -49,7 +50,9 @@ Usage: npm run <script> -- [args]
                                   Copy in a skill that is not in a git repo (not auto-updated)
   skill:remove <skill...>         Remove skills (upstream or local)
   skills:list                     List every skill and where it comes from
-  skills:update [skill...]        Pull the latest version of upstream skills
+  skills:update [skill...] [--min-age <days>]
+                                  Pull the latest version of upstream skills; with --min-age,
+                                  only versions that have been upstream at least that long
   skills:validate                 Check every skill against the Agent Skills spec (runs in CI)
   skills:catalog                  Regenerate CATALOG.md
   skills:package [skill...]       Build dist/<skill>.zip for Claude.ai and ChatGPT uploads
@@ -227,18 +230,55 @@ async function cmdRemove(names) {
   console.log(`✓ Removed ${[...upstreamKeys, ...localDirs].join(', ')}.`);
 }
 
-async function cmdUpdate(names) {
+// With --min-age N, only skills whose upstream folder has been unchanged for N days are updated:
+// a new version has to survive N days in its own repo before it reaches ours.
+async function holdRecentChanges(keys, upstream, minAgeDays) {
+  const eligible = [];
+  for (const key of keys) {
+    const { entry } = upstream.get(sanitizeName(key));
+    const source = entry.sourceUrl || entry.source;
+    let changed;
+    try {
+      changed = await lastUpstreamChange(entry);
+    } catch (error) {
+      console.warn(`⏸ ${key}: holding back, could not check its age on ${source} (${error.message})`);
+      continue;
+    }
+    if (changed === null) {
+      console.warn(`! ${key}: ${source} is not on GitHub, so its age can't be checked; updating without the ${minAgeDays}-day wait`);
+      eligible.push(key);
+      continue;
+    }
+    const ageDays = (Date.now() - changed.getTime()) / 86_400_000;
+    if (ageDays >= minAgeDays) eligible.push(key);
+    else console.log(`⏸ ${key}: changed upstream ${ageDays.toFixed(1)} days ago; waiting until it is ${minAgeDays} days old`);
+  }
+  return eligible;
+}
+
+async function cmdUpdate(argv) {
+  const { flags, positionals: names } = splitFlags(argv, { '--min-age': true });
+  const minAgeDays = flags['--min-age'].length ? Number(flags['--min-age'].at(-1)) : 0;
+  if (!Number.isFinite(minAgeDays) || minAgeDays < 0) fail('--min-age takes a number of days, e.g. --min-age 7');
+
   const upstream = upstreamByDir(await readLock(ROOT));
   if (upstream.size === 0) {
     console.log('No upstream skills to update.');
     await writeCatalog();
     return;
   }
-  const keys = names.map((name) => {
+  let keys = names.map((name) => {
     const tracked = upstream.get(name) ?? upstream.get(sanitizeName(name));
     if (!tracked) fail(`"${name}" is not an upstream skill (see upstream/skills-lock.json)`);
     return tracked.key;
   });
+  if (minAgeDays > 0) {
+    keys = await holdRecentChanges(keys.length ? keys : [...upstream.values()].map((item) => item.key), upstream, minAgeDays);
+    if (keys.length === 0) {
+      console.log(`\nNo upstream skill has been stable for ${minAgeDays} days yet; nothing updated.`);
+      return;
+    }
+  }
   await ensureWorkspace();
   const status = await runSkillsCli(['update', '--project', '--yes', ...keys]);
   if (status !== 0) fail(`skills update failed (exit ${status})`);

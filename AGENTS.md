@@ -32,7 +32,7 @@ npm run skill:add -- <source> --list              # see what a source offers
 npm run skill:new -- <name> --description "..."   # scaffold a local skill
 npm run skill:import -- <folder|file.zip>         # skills that aren't in any git repo
 npm run skill:remove -- <skill...>
-npm run skills:update                             # pull new upstream versions
+npm run skills:update [-- --min-age 7]            # pull new upstream versions (CI waits 7 days)
 npm run skills:validate                           # spec + integrity checks (CI runs this)
 npm run skills:catalog                            # regenerate CATALOG.md
 npm run skills:package                            # dist/<skill>.zip for Claude.ai / ChatGPT

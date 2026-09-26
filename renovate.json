@@ -17,6 +17,8 @@
   "labels": [
     "dependencies"
   ],
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": [
@@ -25,7 +27,7 @@
   },
   "packageRules": [
     {
-      "description": "Merge non-major updates automatically once the Validate workflow (tests + skills CLI smoke test) passes",
+      "description": "Merge non-major updates automatically once they are 7 days old and the Validate workflow (tests + skills CLI smoke test) passes",
       "matchUpdateTypes": [
         "minor",
         "patch",

@@ -14,7 +14,7 @@ your machines ◄──(npx skills update -g, daily timer)── Federico-Baldan
 Claude.ai / ChatGPT ◄──(zip upload)── skill-zips artifact of the Validate workflow
 ```
 
-Upstream skills never land in your agents unreviewed: they reach the repo as a pull request, CI validates them, and your machines only see what's merged.
+Nothing reaches your agents the moment its author publishes it. A new skill version is picked up only after it has sat unchanged in its own repo for 7 days, and a new tool version (Renovate) only once it's 7 days old. Then it arrives as a pull request, CI validates it, and it's merged automatically once the checks pass. Your machines only ever see what's merged.
 
 ## Setup
 
@@ -24,11 +24,14 @@ cd agent-skills
 npm ci
 ```
 
-On GitHub, once:
+On GitHub, once, [install the Renovate app](https://github.com/apps/renovate/installations/new) and give it access to this repo. GitHub only lets you install an app from the browser; everything else below is already configured (via `gh api`):
 
-- Install the [Renovate app](https://github.com/apps/renovate) on this repo. It keeps the `skills` CLI, Node and the GitHub Actions pinned and current, and merges minor/patch bumps after CI passes.
-- Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests" must be on, or the weekly update can't open its PR. (Already enabled for this repo.)
-- Optional: set the repository variable `AUTO_MERGE_SKILL_UPDATES` to `true` (Settings → Secrets and variables → Actions → Variables) if you want the weekly skill updates merged without review.
+- **Auto-merge** is allowed on the repo, and merged branches are deleted.
+- **`main` is protected by a ruleset**: pull requests can merge only when the `Validate skills` and `Skills CLI smoke test` checks from GitHub Actions pass; force pushes and deleting `main` are blocked. Repo admins (you) can still push directly.
+- **Actions may open pull requests** (Settings → Actions → General), which the weekly update needs.
+- **Repository variables** (Settings → Secrets and variables → Actions → Variables):
+  - `AUTO_MERGE_SKILL_UPDATES = true`: weekly skill PRs merge by themselves once the checks pass. Set it to `false` to review each one by hand.
+  - `SKILL_MIN_AGE_DAYS` (default 7 when unset): how long a skill must sit unchanged upstream before it's taken.
 
 ## Use the skills in your agents
 
@@ -60,7 +63,7 @@ The timer uses the `skills` version pinned in `package.json`; re-run `enable` af
 | bring in a skill that isn't in git (folder or zip) | `npm run skill:import -- ~/Downloads/my-skill.zip` |
 | write my own | `npm run skill:new -- my-skill --description "What it does. Use when…"` |
 | remove one | `npm run skill:remove -- my-skill` |
-| update upstream skills now | `npm run skills:update` |
+| update upstream skills now | `npm run skills:update` (add `-- --min-age 7` to apply the 7-day rule) |
 | list everything | `npm run skills:list` |
 | check before committing | `npm test && npm run skills:validate` |
 
@@ -70,9 +73,9 @@ The timer uses the `skills` version pinned in `package.json`; re-run `enable` af
 
 | Workflow | When | What it does |
 | --- | --- | --- |
-| `Update skills` | Mondays 05:17 UTC, or by hand | `skills update` for every upstream skill; opens or refreshes one PR if anything changed |
+| `Update skills` | Mondays 05:17 UTC, or by hand | `skills update` for every upstream skill that's been unchanged upstream for 7+ days; opens (and auto-merges) one PR if anything changed |
 | `Validate` | pushes to `main`, every PR, and each bot update | unit tests, spec and integrity checks, CLI smoke test, builds the zips |
-| Renovate | Monday mornings (Europe/Rome) | bumps the `skills` CLI, Node and pinned actions; weekly lock file maintenance |
+| Renovate | Monday mornings (Europe/Rome) | bumps the `skills` CLI, Node and pinned actions once a release is 7 days old; auto-merges non-major bumps after CI; weekly lock file maintenance |
 
 Validation fails if a `SKILL.md` breaks the spec (name, description, length limits), if an upstream skill no longer matches its hash in `upstream/integrity.json` (someone edited it by hand), if any skill contains a symlink (it could smuggle a local file into an upload zip), or if `CATALOG.md` is stale. The update job validates before it opens the PR and then starts the Validate workflow on the bot branch, because GitHub doesn't trigger workflows from its own bot's pushes. (GitHub may also list a second Validate run on bot PRs marked "action required"; it's waiting for an approval it doesn't need, since the dispatched run already checked the same commit.) GitHub pauses scheduled workflows after 60 days without repo activity; Renovate's weekly PRs normally prevent that, and re-enabling is one click in the Actions tab.
 

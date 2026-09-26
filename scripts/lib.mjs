@@ -35,6 +35,24 @@ export function licenseFile(root, entry) {
   return join(repoPaths(root).licenses, `${entry.source.replace('/', '__')}.txt`);
 }
 
+// When the skill's folder last changed on its upstream default branch (or entry.ref), via the GitHub API.
+// Returns null for sources we can't check (non-GitHub). Throws on API errors so callers can hold the update.
+export async function lastUpstreamChange(entry, { fetchImpl = fetch, token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN } = {}) {
+  if (entry.sourceType !== 'github' || !/^[A-Za-z0-9-]+\/[\w.-]+$/.test(entry.source ?? '')) return null;
+  const folder = entry.skillPath ? dirname(entry.skillPath) : '.';
+  const url = new URL(`https://api.github.com/repos/${entry.source}/commits`);
+  url.searchParams.set('per_page', '1');
+  if (folder !== '.') url.searchParams.set('path', folder);
+  if (entry.ref) url.searchParams.set('sha', entry.ref);
+  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'agent-skills' };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`GitHub API answered HTTP ${response.status}`);
+  const [latest] = await response.json();
+  if (!latest) throw new Error(`no commits found for ${folder}`);
+  return new Date(latest.commit.committer.date);
+}
+
 // Same folder naming as the skills CLI, so lock entries map to the right skills/<dir>.
 export function sanitizeName(name) {
   return (
