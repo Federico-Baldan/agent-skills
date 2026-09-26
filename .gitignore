@@ -1,0 +1,13 @@
+/node_modules/
+/dist/
+.DS_Store
+Thumbs.db
+
+# skills CLI workspace: only the lock file, our integrity file and the .agents/skills symlink are tracked.
+# The CLI also drops per-agent links here (.claude/skills, agent/skills, ...); they are not needed.
+/upstream/*
+!/upstream/skills-lock.json
+!/upstream/integrity.json
+!/upstream/.agents/
+/upstream/.agents/*
+!/upstream/.agents/skills

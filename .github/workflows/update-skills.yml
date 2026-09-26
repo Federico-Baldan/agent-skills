@@ -1,0 +1,95 @@
+name: Update skills
+
+on:
+  schedule:
+    - cron: '17 5 * * 1' # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-skills
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update upstream skills
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write # to start the Validate workflow on the bot's branch (GITHUB_TOKEN pushes don't trigger it)
+    env:
+      BRANCH: bot/update-skills
+      DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Update upstream skills with the skills CLI
+        run: npm run skills:update
+      - run: npm run skills:validate
+
+      - name: Open, refresh or close the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.ref_name }}
+          AUTO_MERGE: ${{ vars.AUTO_MERGE_SKILL_UPDATES }}
+        run: |
+          if [ "$BASE" = "$BRANCH" ]; then
+            echo "Run this workflow from the default branch, not from $BRANCH."
+            exit 1
+          fi
+          open_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')"
+
+          if [ -z "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "All upstream skills are already up to date."
+            if [ -n "$open_pr" ]; then
+              gh pr close "$open_pr" --delete-branch --comment 'Superseded: the upstream skills already match the default branch.'
+            fi
+            exit 0
+          fi
+
+          # Only skill content, the lock/integrity files and the catalog may change.
+          unexpected="$(git status --porcelain=v1 -z --untracked-files=all | tr '\0' '\n' | cut -c4- \
+            | grep -Ev '^(skills/|upstream/skills-lock\.json$|upstream/integrity\.json$|CATALOG\.md$)' || true)"
+          if [ -n "$unexpected" ]; then
+            printf 'Unexpected files changed by the update:\n%s\n' "$unexpected"
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C "$BRANCH"
+          git add -A -- skills upstream/skills-lock.json upstream/integrity.json CATALOG.md
+          skills_changed="$(git -c core.quotePath=false diff --cached --name-only -- skills | cut -d/ -f2 | sort -u | sed 's/^/- /')"
+          git commit -m 'chore(skills): update upstream skills'
+          git push --force origin "$BRANCH"
+
+          {
+            echo 'The weekly skills update found new versions of these upstream skills:'
+            echo
+            printf '%s\n' "$skills_changed"
+            echo
+            cat <<'MD'
+          Skills run with the full permissions of your agents: read the diff before merging.
+          After merging, machines pick it up with `npx skills update -g` (daily if `npm run skills:autoupdate -- enable` is on).
+          MD
+          } > "$RUNNER_TEMP/body.md"
+
+          if [ -z "$open_pr" ]; then
+            gh pr create --base "$BASE" --head "$BRANCH" --title 'chore(skills): update upstream skills' --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr edit "$open_pr" --body-file "$RUNNER_TEMP/body.md"
+          fi
+
+          if [ "$AUTO_MERGE" = 'true' ]; then
+            gh pr merge "$BRANCH" --squash --delete-branch
+            gh workflow run validate.yml --ref "$BASE"
+          else
+            gh workflow run validate.yml --ref "$BRANCH"
+          fi

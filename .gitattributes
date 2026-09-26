@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# Keep skill files byte-for-byte as installed: upstream skills are checked against
+# the hashes in upstream/skills-lock.json, so git must never rewrite their line endings.
+skills/** -text

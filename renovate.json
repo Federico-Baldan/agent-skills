@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigestsToSemver",
+    ":semanticCommits"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "skills/**",
+    "upstream/**"
+  ],
+  "timezone": "Europe/Rome",
+  "schedule": [
+    "* 0-6 * * 1"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "* 0-6 * * 1"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Merge non-major updates automatically once the Validate workflow (tests + skills CLI smoke test) passes",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest",
+        "lockFileMaintenance"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Major versions can change behaviour: review them by hand",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    }
+  ]
+}

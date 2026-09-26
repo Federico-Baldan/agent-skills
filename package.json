@@ -1,0 +1,31 @@
+{
+  "name": "agent-skills",
+  "version": "0.0.0",
+  "private": true,
+  "description": "One repo for every agent skill I use: Claude, ChatGPT/Codex, Cursor, Copilot, Gemini and any agent that reads SKILL.md.",
+  "repository": "github:Federico-Baldan/agent-skills",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "scripts": {
+    "skills": "node scripts/skills.mjs",
+    "skill:add": "node scripts/skills.mjs add",
+    "skill:new": "node scripts/skills.mjs new",
+    "skill:import": "node scripts/skills.mjs import",
+    "skill:remove": "node scripts/skills.mjs remove",
+    "skills:list": "node scripts/skills.mjs list",
+    "skills:update": "node scripts/skills.mjs update",
+    "skills:validate": "node scripts/skills.mjs validate",
+    "skills:catalog": "node scripts/skills.mjs catalog",
+    "skills:package": "node scripts/skills.mjs package",
+    "skills:install": "node scripts/skills.mjs install",
+    "skills:autoupdate": "node scripts/skills.mjs autoupdate",
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "skills": "1.7.0",
+    "yaml": "2.9.1"
+  }
+}
