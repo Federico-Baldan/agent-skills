@@ -55,6 +55,8 @@ jobs:
             echo "All upstream skills are already up to date."
             if [ -n "$open_pr" ]; then
               gh pr close "$open_pr" --delete-branch --comment 'Superseded: the upstream skills already match the default branch.'
+            elif git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+              git push origin --delete "$BRANCH" # left behind by an auto-merged PR
             fi
             exit 0
           fi
